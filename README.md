@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-Release Notes for S0ix Selftest Tool for Linux OS
+Release Notes for S0ix Selftest Tool
 
 Thanks for using S0ix Selftest Tool. This tool is designed for Linux OS, it can
 be used to do the initial debugging for the S2idle path CPU Pacakge C-state and
@@ -49,6 +48,4 @@ any driver or fw issue blocks S2idle itself funcitonality, please fix it first.
 
 6. If the users have good idea to improve this script, you are very welcome to send
 us the patches, thanks!
-=======
-# S0ixSelftestTool
->>>>>>> origin/main
+
