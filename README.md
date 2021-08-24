@@ -38,14 +38,17 @@ Additional Notes:
 2. If the users see "awk: line 10: function gensub never defined" message during
  running the script, please install gawk
 
-3. There are two binaries will be used in this tool: turbostat and powertop
+3. If the users see "sudo: xxd: command not found" message during running the script,
+please try to install a vim-common package
 
-4. The acpidump tool(can be accessed by installing acpica-tools) is needed for using this tool
+4. There are two binaries will be used in this tool: turbostat and powertop
 
-5. If the users' system fails to entry S2idle, then this tool will not help. All
+5. The acpidump tool(can be accessed by installing acpica-tools) is needed for using this tool
+
+6. If the users' system fails to entry S2idle, then this tool will not help. All
 the s0ix debugging is based on S2idle entry and exit works normally, if there is
-any driver or fw issue blocks S2idle itself funcitonality, please fix it first.
+any driver or fw issue blocks S2idle itself functionality, please fix it first.
 
-6. If the users have good idea to improve this script, you are very welcome to send
+7. If the users have good idea to improve this script, you are very welcome to send
 us the patches, thanks!
 
