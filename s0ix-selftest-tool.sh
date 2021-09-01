@@ -244,15 +244,19 @@ https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree
 
 #Function to check runtime PC10 state when screen on
 pc10_idle_on() {
+  local runtime_pkg8=""
   local runtime_pkg10=""
   local turbostat_runtime=""
   local pc10_para="CPU%c1,CPU%c6,CPU%c7,GFX%rc6,Pkg%pc2,Pkg%pc3,Pkg%pc6,Pkg%pc7,Pkg%pc8,Pkg%pc9,Pk%pc10"
   log_output "\nThe system will keep idle for 40 seconds then check runtime PC10 state:\n"
   sleep 40
   turbostat_runtime=$("$DIR"/turbostat --quiet --show "$pc10_para" sleep 30 2>&1)
+  runtime_pkg8=$(echo "$turbostat_runtime" | sed -n '/Pkg\%pc8/{n;p}' |
+    awk '{print $9}')
   runtime_pkg10=$(echo "$turbostat_runtime" | sed -n '/Pk\%pc10/{n;p}' |
     awk '{print $11}')
-  log_output "\nThe CPU runtime PC10 residency when screen ON: $runtime_pkg10%\n"
+  log_output "\nThe CPU runtime PC10 residency when screen ON: $runtime_pkg10%"
+  log_output "The CPU runtime PC8 residency when screen ON: $runtime_pkg8%\n"
   log_output "\nTurbostat log: \n$turbostat_runtime\n"
 
   #Judge whether turbostat tool supports the test platform
@@ -286,7 +290,15 @@ $runtime_pkg10%\033[0m\n"
     log_output "\n\033[31mYour system achieved the runtime PC10 during screen ON, \
     \nbut the residency is too low and need to do the further debugging: \
 $runtime_pkg10%\033[0m\n"
-    return 1
+    return 0
+
+  elif
+    [[ -n "$runtime_pkg8" ]] &&
+      [[ "$(echo "scale=2; $runtime_pkg8 > 1.00" | bc)" -eq 1 ]]
+  then
+    log_output "\n\033[32mYour system did not achieve the runtime PC10 during screen ON, \
+\nbut the runtime PC8 residency is available:$runtime_pkg8%\033[0m\n"
+    return 0
   fi
 
   log_output "\n\033[31mYour system did not achieve the runtime PC10 state \
@@ -308,13 +320,17 @@ pc10_idle_off() {
   \nturbostat tool will read the PC10 counter after 40 seconds idle...\n"
   xset dpms 30
 
+  local runtime_pkg8=""
   local runtime_pkg10=""
   local turbostat_runtime=""
   sleep 40
   turbostat_runtime=$("$DIR"/turbostat --quiet --show "$pc10_para" sleep 35 2>&1)
+  runtime_pkg8=$(echo "$turbostat_runtime" | sed -n '/Pkg\%pc8/{n;p}' |
+    awk '{print $9}')
   runtime_pkg10=$(echo "$turbostat_runtime" | sed -n '/Pk\%pc10/{n;p}' |
     awk '{print $11}')
   log_output "The CPU runtime PC10 state when screen OFF: $runtime_pkg10%"
+  log_output "The CPU runtime PC8 residency when screen OFF: $runtime_pkg8%\n"
   log_output "\nTurbostat log: \n$turbostat_runtime\n"
 
   #Judge whether turbostat tool supports the test platform
@@ -348,10 +364,19 @@ screen OFF: $runtime_pkg10%\033[0m\n"
       [[ "$(echo "scale=2; $runtime_pkg10 < 50.00" | bc)" -eq 1 ]]
   then
     log_output "\n\033[31mYour system achieved the runtime PC10 state during Screen OFF, \
-    \nbut is the residency is too low and need to do the further debugging: \
+    \nbut the residency is too low and need to do the further debugging: \
   $runtime_pkg10%\033[0m\n"
     xset dpms force on && xset -dpms
-    return 1
+    return 0
+
+  elif
+    [[ -n "$runtime_pkg8" ]] &&
+      [[ "$(echo "scale=2; $runtime_pkg8 > 1.00" | bc)" -eq 1 ]]
+  then
+    log_output "\n\033[32mYour system did not achieve the runtime PC10 during screen OFF, \
+\nbut the runtime PC8 residency is available:$runtime_pkg8%\033[0m\n"
+    xset dpms force on && xset -dpms
+    return 0
   fi
 
   log_output "\n\033[31mYour system did not achieve the runtime PC10 state \
@@ -1109,6 +1134,20 @@ and S0ix state."
   return 1
 }
 
+ignore_ltr_all() {
+  local ltr_ip_num
+  local num
+  local i=0
+
+  ltr_ip_num=$(wc -l $PMC_CORE_SYSFS_PATH/ltr_show 2>&1 | awk '{print$1}')
+  num=$((ltr_ip_num - 1))
+
+  while [ $i -ne $num ]; do
+    echo $i >$PMC_CORE_SYSFS_PATH/ltr_ignore 2>&1
+    i=$((i + 1))
+  done
+}
+
 debug_pch_ip_pg() {
   local south_port_before=""
   local south_port_after=""
@@ -1263,13 +1302,27 @@ if [[ $runtime == on ]]; then
   else
     powertop --auto-tune 2>&1
   fi
+
   if pc10_idle_on; then
-    log_output "\n"
+    log_output "Checking display DMC FW status:"
   elif dmc_check; then
-    log_output "\nIntel graphics i915 DMC FW is loaded, \
-      \nChecking PCIe bridge Link PM states:\n"
-    debug_pcie_bridge_lpm "$@"
-    exit 0
+    log_output "\nIntel graphics i915 DMC FW is loaded. Will re-check the deeper
+Package C-state by ignoring PCI Devices LTR value:\n"
+
+    #Ignore all the PCI devices LTR values
+    ignore_ltr_all
+    log_output "All the PCI devices LTR values ignore is done!"
+
+    if pc10_idle_on; then
+      log_output "\n\033[32mThe deeper CPU Package C-state is available after
+PCI devices LTR ignore,please investigate the potential IP LTR issue.\033[0m\n"
+      exit 0
+    else
+      log_output "\nPCI devices LTR value ignore does not help the PC10, will
+check PCIe bridge Link PM states:\n"
+      debug_pcie_bridge_lpm "$@"
+      exit 0
+    fi
   fi
 fi
 
@@ -1284,10 +1337,23 @@ if [[ $runtime == off ]]; then
   if pc10_idle_off; then
     log_output "Checking display DMC FW status:"
   elif dmc_check; then
-    log_output "Intel graphics i915 DMC FW is loaded, but still did not get runtime PC10 \
-    \nChecking PCIe bridge Link PM states:\n"
-    debug_pcie_bridge_lpm "$@"
-    exit 0
+    log_output "\nIntel graphics i915 DMC FW is loaded. Will re-check the deeper
+Package C-state by ignoring PCI Devices LTR value:\n"
+
+    #Ignore all the PCI devices LTR values
+    ignore_ltr_all
+    log_output "All the PCI devices LTR values ignore is done!"
+
+    if pc10_idle_off; then
+      log_output "\n\033[32mThe deeper CPU Package C-state is available after
+PCI devices LTR ignore, please investigate the potential IP LTR issue.\033[0m\n"
+      exit 0
+    else
+      log_output "\nPCI devices LTR value ignore does not help the PC10, will
+check PCIe bridge Link PM states:\n"
+      debug_pcie_bridge_lpm "$@"
+      exit 0
+    fi
   fi
 fi
 
