@@ -22,6 +22,7 @@ PCIEPORT_D0=""
 PCIEPORT_D3HOT=""
 PCIEPORT_L0=""
 ASPM_ENABLE=""
+KERNEL_VER="$(uname -a)"
 #Define which debug stage should go
 DEBUG=""
 touch "$PWD"/"$DATE"-s0ix-output.log
@@ -1297,6 +1298,8 @@ double check or report a bug.\033[0m\n"
 ##############################################################################
 if [[ $runtime == on ]]; then
   log_output "\n---Check Runtime PC10 Residency during Screen ON---:"
+  [[ -n "$KERNEL_VER" ]] && log_output "\nThe system OS Kernel version is:
+$KERNEL_VER\n"
   if ! type powertop 1>/dev/null 2>&1; then
     log_output "\033[31mPlease install powertop tool.\033[0m\n"
   else
@@ -1329,6 +1332,8 @@ fi
 ##############################################################################
 if [[ $runtime == off ]]; then
   log_output "\n---Check Runtime PC10 Residency during Screen OFF---:"
+  [[ -n "$KERNEL_VER" ]] && log_output "\nThe system OS Kernel version is:
+$KERNEL_VER\n"
   if ! type powertop 1>/dev/null 2>&1; then
     log_output "\033[31mPlease install powertop tool.\033[0m\n"
   else
@@ -1360,6 +1365,8 @@ fi
 ##############################################################################
 if [[ $s2idle == 1 ]]; then
   log_output "\n---Check S2idle path S0ix Residency---:"
+  [[ -n "$KERNEL_VER" ]] && log_output "\nThe system OS Kernel version is:
+$KERNEL_VER"
   log_output "\n---Check whether your system supports S0ix or not---:"
   if slp_s0_support; then
     log_output "\n"
