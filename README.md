@@ -45,10 +45,13 @@ please try to install a vim-common package
 
 5. The acpidump tool(can be accessed by installing acpica-tools) is needed for using this tool
 
-6. If the users' system fails to entry S2idle, then this tool will not help. All
+6. Before using this tool please disable secure boot option from BIOS setup, 
+which may cause operation permision issue.
+
+7. If the users' system fails to entry S2idle, then this tool will not help. All
 the s0ix debugging is based on S2idle entry and exit works normally, if there is
 any driver or fw issue blocks S2idle itself functionality, please fix it first.
 
-7. If the users have good idea to improve this script, you are very welcome to send
+8. If the users have good idea to improve this script, you are very welcome to send
 us the patches, thanks!
 
