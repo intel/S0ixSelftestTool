@@ -226,12 +226,15 @@ dmc_check() {
     awk '{print $3}')
   dmc_log=$(dmesg | grep -i DMC 2>&1)
 
-  if [[ $dmc_load == yes ]]; then
-    log_output "\nYour system Intel graphics DMC FW loaded status is:$dmc_load
-$dmc_log"
-    return 0
+  if [[ -n "$dmc_load" ]] && [[ $dmc_load == yes ]]; then
+    log_output "\nYour system Intel graphics DMC FW loaded status is:$dmc_load\n"
   else
-    log_output "\n\033[31mYour system loaded Intel i915 DMC FW is not the latest \
+    log_output "\nDid not get i915 dmc info from sysfs.\n"
+    if [[ -n "$dmc_log" ]]; then
+      log_output "$dmc_log\n"
+      return 0
+    else
+      log_output "\n\033[31mYour system loaded Intel i915 DMC FW is not the latest \
 version, \nor you did not install the DMC FW correctly: \n$dmc_log,
     \nplease refer to \
 https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/i915 \
@@ -239,7 +242,8 @@ https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree
     \nor re-install the Firmware package or manually check DMC FW file from /lib/firmware/i915.
     \nIf you are running with CentOS, try the command: \
 #dracut -i /lib/firmware/i915 /lib/firmware/i915 --force and reboot.\n\033[0m"
-    return 1
+      return 1
+    fi
   fi
 }
 
@@ -761,6 +765,16 @@ BIOS are in use, \
   return 0
 }
 
+debug_pcie_link_aspm() {
+  link_aspm_disable=$(lspci -vvv | grep "ASPM Disabled" 2>&1)
+  if [[ -n "$link_aspm_disable" ]]; then
+    log_output "\n\033[31mDetected PCIe device link ASPM Disabled, please investigate!\033[0m\n"
+    log_output "\033[31m$link_aspm_disable\033[0m\n"
+    return 0
+  fi
+  return 1
+}
+
 #Function to check PCIe bridge Link Power Management state
 debug_pcie_bridge_lpm() {
   PCI_SYSFS="/sys/devices/pci0000:00"
@@ -769,7 +783,8 @@ debug_pcie_bridge_lpm() {
   bridge_devices=()
   local link_substate_cap=""
   local link_substate_ctl=""
-  local pci_tree=$(lspci -tvv)
+  local pci_tree=""
+  pci_tree=$(lspci -tvv)
 
   # Get list of pci bridge devices
   for dev in $devices; do
@@ -1307,7 +1322,7 @@ $KERNEL_VER\n"
   fi
 
   if pc10_idle_on; then
-    log_output "Checking display DMC FW status:"
+    log_output "\n"
   elif dmc_check; then
     log_output "\nIntel graphics i915 DMC FW is loaded. Will re-check the deeper
 Package C-state by ignoring PCI Devices LTR value:\n"
@@ -1322,9 +1337,12 @@ PCI devices LTR ignore,please investigate the potential IP LTR issue.\033[0m\n"
       exit 0
     else
       log_output "\nPCI devices LTR value ignore does not help the PC10, will
-check PCIe bridge Link PM states:\n"
-      debug_pcie_bridge_lpm "$@"
-      exit 0
+check PCIe Link PM states:\n"
+      if debug_pcie_link_aspm; then
+        exit 0
+      else debug_pcie_bridge_lpm "$@"
+        exit 0
+      fi
     fi
   fi
 fi
@@ -1340,7 +1358,7 @@ $KERNEL_VER\n"
     powertop --auto-tune 2>&1
   fi
   if pc10_idle_off; then
-    log_output "Checking display DMC FW status:"
+    log_output "\n"
   elif dmc_check; then
     log_output "\nIntel graphics i915 DMC FW is loaded. Will re-check the deeper
 Package C-state by ignoring PCI Devices LTR value:\n"
@@ -1355,9 +1373,12 @@ PCI devices LTR ignore, please investigate the potential IP LTR issue.\033[0m\n"
       exit 0
     else
       log_output "\nPCI devices LTR value ignore does not help the PC10, will
-check PCIe bridge Link PM states:\n"
-      debug_pcie_bridge_lpm "$@"
-      exit 0
+check PCIe Link PM states:\n"
+      if debug_pcie_link_aspm; then
+        exit 0
+      else debug_pcie_bridge_lpm "$@"
+        exit 0
+      fi
     fi
   fi
 fi
