@@ -145,11 +145,15 @@ pci_d3_status_check() {
       awk -F " " '{print $2}' | sed 's/:$//')
     #Check the ASPM enable status for the D0 state pcieroot port
     if [[ -n "$PCIEPORT_D0" ]]; then
-      ASPM_ENABLE=$(lspci -vvv -s"$PCIEPORT_D0" | grep "LnkCtl:" | grep Enabled)
-      log_output "The pcieport $PCIEPORT_D0 ASPM enable status:\n$ASPM_ENABLE\n"
+      for PCIEPORT in $PCIEPORT_D0
+      do
+        ASPM_ENABLE=$(lspci -vvv -s"$PCIEPORT" | grep "LnkCtl:" | grep Enabled)
+        log_output "The pcieport $PCIEPORT ASPM enable status:\n$ASPM_ENABLE\n"
+
+        log_output "Pcieport is not in D3cold：\
+          \n\033[31m$PCIEPORT\033[0m\n"
+        done
     fi
-    [[ -n "$PCIEPORT_D0" ]] && log_output "Pcieport is not in D3cold：\
-    \n\033[31m$PCIEPORT_D0\033[0m\n"
     [[ -n "$PCIEPORT_D3HOT" ]] && log_output "Pcieport is not in D3cold: \
     \n\033[31m$PCIEPORT_D3HOT\033[0m\n"
     return 1
