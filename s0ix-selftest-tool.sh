@@ -145,14 +145,13 @@ pci_d3_status_check() {
       awk -F " " '{print $2}' | sed 's/:$//')
     #Check the ASPM enable status for the D0 state pcieroot port
     if [[ -n "$PCIEPORT_D0" ]]; then
-      for PCIEPORT in $PCIEPORT_D0
-      do
+      for PCIEPORT in $PCIEPORT_D0; do
         ASPM_ENABLE=$(lspci -vvv -s"$PCIEPORT" | grep "LnkCtl:" | grep Enabled)
         log_output "The pcieport $PCIEPORT ASPM enable status:\n$ASPM_ENABLE\n"
 
         log_output "Pcieport is not in D3cold：\
           \n\033[31m$PCIEPORT\033[0m\n"
-        done
+      done
     fi
     [[ -n "$PCIEPORT_D3HOT" ]] && log_output "Pcieport is not in D3cold: \
     \n\033[31m$PCIEPORT_D3HOT\033[0m\n"
@@ -256,9 +255,22 @@ pc10_idle_on() {
   local runtime_pkg8=""
   local runtime_pkg10=""
   local turbostat_runtime=""
+  local dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
   local pc10_para="CPU%c1,CPU%c6,CPU%c7,GFX%rc6,Pkg%pc2,Pkg%pc3,Pkg%pc6,Pkg%pc7,Pkg%pc8,Pkg%pc9,Pk%pc10"
+  local dc5_before=""
+  local dc5_after=""
+  local dc6_before=""
+  local dc6_after=""
+
+  dc5_before=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $NF}' 2>&1)
+  dc6_before=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $NF}' 2>&1)
   log_output "\nThe system will keep idle for 40 seconds then check runtime PC10 state:\n"
   sleep 40
+  dc5_after=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $NF}' 2>&1)
+  dc6_after=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $NF}' 2>&1)
+  dmc_info=$(cat /sys/kernel/debug/dri/0/i915_dmc_info)
+  dc5_count_delta=$(echo "$dc5_after-$dc5_before" | bc)
+  dc6_count_delta=$(echo "$dc6_after-$dc6_before" | bc)
   turbostat_runtime=$("$DIR"/turbostat --quiet --show "$pc10_para" sleep 30 2>&1)
   runtime_pkg8=$(echo "$turbostat_runtime" | sed -n '/Pkg\%pc8/{n;p}' |
     awk '{print $9}')
@@ -298,7 +310,14 @@ $runtime_pkg10%\033[0m\n"
   then
     log_output "\n\033[31mYour system achieved the runtime PC10 during screen ON, \
     \nbut the residency is too low and need to do the further debugging: \
-$runtime_pkg10%\033[0m\n"
+$runtime_pkg10%\033[0m
+    \n\nPotential Isolation Check: \
+    \nDisplay DC5 count delta is $dc5_count_delta in 40 seconds idle, \
+    \nwhich stands for display behavior. \
+    \nDisplay DC6 count delta is $dc6_count_delta in 40 seconds idle, \
+    \nwhich includes other peripheral besides display.\
+    \n/sys/kernel/debug/dri/0/i915_dmc_info shows:\n"
+    log_output "$dmc_info"
     return 0
 
   elif
@@ -1344,7 +1363,8 @@ PCI devices LTR ignore,please investigate the potential IP LTR issue.\033[0m\n"
 check PCIe Link PM states:\n"
       if debug_pcie_link_aspm; then
         exit 0
-      else debug_pcie_bridge_lpm "$@"
+      else
+        debug_pcie_bridge_lpm "$@"
         exit 0
       fi
     fi
@@ -1380,7 +1400,8 @@ PCI devices LTR ignore, please investigate the potential IP LTR issue.\033[0m\n"
 check PCIe Link PM states:\n"
       if debug_pcie_link_aspm; then
         exit 0
-      else debug_pcie_bridge_lpm "$@"
+      else
+        debug_pcie_bridge_lpm "$@"
         exit 0
       fi
     fi
