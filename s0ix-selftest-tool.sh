@@ -891,7 +891,7 @@ debug_pcie_bridge_lpm() {
   echo "Available bridge device:" "${bridge_devices[@]}"
   for dev in "${bridge_devices[@]}"; do
     #Get lower 16 bits of PCIESTS1 register
-    pciests1=$(sudo xxd -ps -l2 -s 0x32a "${PCI_SYSFS}"/"${dev}"/config)
+    pciests1=$(xxd -ps -l2 -s 0x32a "${PCI_SYSFS}"/"${dev}"/config)
     if [[ "$(link_state "${pciests1}")" == "Link is in L1.1" ]] ||
       [[ "$(link_state "${pciests1}")" == "Link is in L1.2" ]] ||
       [[ "$(link_state "${pciests1}")" == "Link is in Detect" ]] ||
