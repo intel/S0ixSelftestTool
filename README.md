@@ -18,19 +18,19 @@ https://01.org/blogs/qwang59/2020/linux-s0ix-troubleshooting
 How to use this tool?
 After git clone https://github.com/intel-sandbox/linux-s0ix-self-test-tool.git
 please do below before running:
-chmod +x s0ix-self-test.sh
+chmod +x s0ix-selftest-tool.sh
 chmod +x turbostat
 
 To check S2idle Path Package C-state or S0ix, using
-./s0ix-self-test.sh -s
+./s0ix-selftest-tool.sh -s
 Usually the users only need to wait for less than 3 minutes to get the debugging
 results or messages.
 
 To check runtime PC10 with screen on, using
-./s0ix-self-test.sh -r on
+./s0ix-selftest-tool.sh -r on
 
 To check runtime PC10 with screen off, using
-./s0ix-self-test.sh -r off
+./s0ix-selftest-tool.sh -r off
 
 Additional Notes:
 1. The Users need to run this tool as root account
