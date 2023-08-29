@@ -16,10 +16,6 @@ https://01.org/blogs/qwang59/2018/how-achieve-s0ix-states-linux
 https://01.org/blogs/qwang59/2020/linux-s0ix-troubleshooting
 
 How to use this tool?
-After git clone https://github.com/intel-sandbox/linux-s0ix-self-test-tool.git
-please do below before running:
-chmod +x s0ix-self-test.sh
-chmod +x turbostat
 
 To check S2idle Path Package C-state or S0ix, using
 ./s0ix-self-test.sh -s
