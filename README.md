@@ -1,4 +1,4 @@
-Release Notes for S0ix Selftest Tool
+# Release Notes for S0ix Selftest Tool
 
 Thanks for using S0ix Selftest Tool. This tool is designed for Linux OS, it can
 be used to do the initial debugging for the S2idle path CPU Pacakge C-state and
@@ -11,22 +11,22 @@ the bugs in the Bugzilla. This script will archive the debugging process logs,
 which will be helpful for the future advanced debugging.
 
 This tool's design follows the basic debugging process introduced in the
-documents below:
-https://01.org/blogs/qwang59/2018/how-achieve-s0ix-states-linux
+documents below:  
+https://01.org/blogs/qwang59/2018/how-achieve-s0ix-states-linux  
 https://01.org/blogs/qwang59/2020/linux-s0ix-troubleshooting
 
 How to use this tool?
 
-To check S2idle Path Package C-state or S0ix, using
-./s0ix-self-test.sh -s
+To check S2idle Path Package C-state or S0ix, using  
+`./s0ix-self-test.sh -s`  
 Usually the users only need to wait for less than 3 minutes to get the debugging
 results or messages.
 
-To check runtime PC10 with screen on, using
-./s0ix-self-test.sh -r on
+To check runtime PC10 with screen on, using  
+`./s0ix-self-test.sh -r on`
 
-To check runtime PC10 with screen off, using
-./s0ix-self-test.sh -r off
+To check runtime PC10 with screen off, using  
+`./s0ix-self-test.sh -r off`
 
 Additional Notes:
 1. The Users need to run this tool as root account
