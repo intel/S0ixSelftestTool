@@ -800,7 +800,7 @@ debug_pcie_link_aspm() {
 
 #Function to check PCIe bridge Link Power Management state
 debug_pcie_bridge_lpm() {
-  PCI_SYSFS="/sys/devices/pci0000:00"
+  PCI_SYSFS="/sys/bus/pci/devices"
   PCI_BRIDGE_CLASS="0x060400"
   devices=$(ls ${PCI_SYSFS})
   bridge_devices=()
