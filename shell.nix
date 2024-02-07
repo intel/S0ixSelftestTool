@@ -6,5 +6,6 @@
       pkgs.xxd
       pkgs.powertop
       pkgs.gawk
+      pkgs.bc
     ];
   }
