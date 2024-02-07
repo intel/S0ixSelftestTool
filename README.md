@@ -12,21 +12,21 @@ which will be helpful for the future advanced debugging.
 
 This tool's design follows the basic debugging process introduced in the
 documents below:  
-https://01.org/blogs/qwang59/2018/how-achieve-s0ix-states-linux  
-https://01.org/blogs/qwang59/2020/linux-s0ix-troubleshooting
+https://web.archive.org/web/20230614200816/https://01.org/blogs/qwang59/2018/how-achieve-s0ix-states-linux
+https://web.archive.org/web/20230614200306/https://01.org/blogs/qwang59/2020/linux-s0ix-troubleshooting
 
 How to use this tool?
 
 To check S2idle Path Package C-state or S0ix, using  
-`./s0ix-self-test.sh -s`  
+`./s0ix-selftest-tool.sh -s`
 Usually the users only need to wait for less than 3 minutes to get the debugging
 results or messages.
 
 To check runtime PC10 with screen on, using  
-`./s0ix-self-test.sh -r on`
+`./s0ix-selftest-tool.sh -r on`
 
 To check runtime PC10 with screen off, using  
-`./s0ix-self-test.sh -r off`
+`./s0ix-selftest-tool.sh -r off`
 
 Additional Notes:
 1. The Users need to run this tool as root account
