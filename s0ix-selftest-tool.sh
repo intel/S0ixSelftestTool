@@ -1100,14 +1100,14 @@ debug_ltr_value() {
 
     if [ "$(echo "scale=2; $slp_s0 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nS0ix residency is available after IP number $counter LTR ignore\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1 &&
+        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p"
       exit 0
     elif [ "$(echo "scale=2; $pc10 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nNo S0ix residency, only PC10 is available after IP number \
 $counter LTR ignore:\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1 &&
+        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p"
       return 0
       break
     else
