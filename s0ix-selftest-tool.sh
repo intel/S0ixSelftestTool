@@ -1087,7 +1087,7 @@ debug_ltr_value() {
     if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
       echo freeze 2>&1 >/sys/power/state); then
       TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-      pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+      pc10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
         awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
       slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
         awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
