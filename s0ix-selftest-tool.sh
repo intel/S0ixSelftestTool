@@ -1087,7 +1087,7 @@ debug_ltr_value() {
     if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
       echo freeze 2>&1 >/sys/power/state); then
       TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-      pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+      pc10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
         awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
       slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
         awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
@@ -1100,14 +1100,14 @@ debug_ltr_value() {
 
     if [ "$(echo "scale=2; $slp_s0 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nS0ix residency is available after IP number $counter LTR ignore\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1 &&
+        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p"
       exit 0
     elif [ "$(echo "scale=2; $pc10 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nNo S0ix residency, only PC10 is available after IP number \
 $counter LTR ignore:\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1 &&
+        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p"
       return 0
       break
     else
