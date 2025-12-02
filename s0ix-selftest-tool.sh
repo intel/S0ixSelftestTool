@@ -32,6 +32,29 @@ log_output() {
   echo -e "${*}" | tee -a "$PWD"/"$DATE"-s0ix-output.log
 }
 
+# Function to detect the correct DRI path for i915
+detect_dri_path() {
+  local dri_base="/sys/kernel/debug/dri"
+  local dri_path=""
+
+  # Check if dri directory exists
+  if [[ ! -d "$dri_base" ]]; then
+    echo ""
+    return 1
+  fi
+
+  # Search for i915_dmc_info in all card directories
+  for card_dir in "$dri_base"/*; do
+    if [[ -d "$card_dir" ]] && [[ -f "$card_dir/i915_dmc_info" ]]; then
+      dri_path="$card_dir"
+      break
+    fi
+  done
+
+  echo "$dri_path"
+  [[ -n "$dri_path" ]]
+}
+
 # Function to return the index of a column name in turbo columns 
 get_column_index(){
   local columns="$1"
@@ -241,8 +264,29 @@ substate_triage() {
 dmc_check() {
   local dmc_load=""
   local dmc_log=""
+  local dri_path=""
 
-  dmc_load=$(grep "fw loaded" /sys/kernel/debug/dri/0/i915_dmc_info | head -n 1 |
+  dri_path=$(detect_dri_path)
+  if [[ -z "$dri_path" ]]; then
+    log_output "\nCould not find i915_dmc_info in any DRI device path.\n"
+    dmc_log=$(dmesg | grep -i DMC 2>&1)
+    if [[ -n "$dmc_log" ]]; then
+      log_output "$dmc_log\n"
+      return 0
+    else
+      log_output "\n\033[31mYour system loaded Intel i915 DMC FW is not the latest \
+version, \nor you did not install the DMC FW correctly: \n$dmc_log,
+    \nplease refer to \
+https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/i915 \
+    \nto get the latest display DMC FW. \
+    \nor re-install the Firmware package or manually check DMC FW file from /lib/firmware/i915.
+    \nIf you are running with CentOS, try the command: \
+#dracut -i /lib/firmware/i915 /lib/firmware/i915 --force and reboot.\n\033[0m"
+      return 1
+    fi
+  fi
+
+  dmc_load=$(grep "fw loaded" "$dri_path/i915_dmc_info" | head -n 1 |
     awk '{print $3}')
   dmc_log=$(dmesg | grep -i DMC 2>&1)
 
@@ -272,22 +316,30 @@ pc10_idle_on() {
   local runtime_pkg8=""
   local runtime_pkg10=""
   local turbostat_runtime=""
-  local dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  local dmc_dir=""
   local pc10_para=$(echo "$TURBO_COLUMNS" | sed 's/,[^,]*$//')
   local dc5_before=""
   local dc5_after=""
   local dc6_before=""
   local dc6_after=""
 
-  dc5_before=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $NF}' 2>&1)
-  dc6_before=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $NF}' 2>&1)
+  dmc_dir=$(detect_dri_path)
+  if [[ -z "$dmc_dir" ]]; then
+    log_output "\nWarning: Could not find i915_dmc_info, skipping DC state checks.\n"
+  else
+    dmc_dir="$dmc_dir/i915_dmc_info"
+    dc5_before=$(grep -i "DC3 -> DC5" "$dmc_dir" | awk '{print $NF}' 2>&1)
+    dc6_before=$(grep -i "DC5 -> DC6" "$dmc_dir" | awk '{print $NF}' 2>&1)
+  fi
   log_output "\nThe system will keep idle for 40 seconds then check runtime PC10 state:\n"
   sleep 40
-  dc5_after=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $NF}' 2>&1)
-  dc6_after=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $NF}' 2>&1)
-  dmc_info=$(cat /sys/kernel/debug/dri/0/i915_dmc_info)
-  dc5_count_delta=$(echo "$dc5_after-$dc5_before" | bc)
-  dc6_count_delta=$(echo "$dc6_after-$dc6_before" | bc)
+  if [[ -n "$dmc_dir" ]]; then
+    dc5_after=$(grep -i "DC3 -> DC5" "$dmc_dir" | awk '{print $NF}' 2>&1)
+    dc6_after=$(grep -i "DC5 -> DC6" "$dmc_dir" | awk '{print $NF}' 2>&1)
+    dmc_info=$(cat "$dmc_dir")
+    dc5_count_delta=$(echo "$dc5_after-$dc5_before" | bc)
+    dc6_count_delta=$(echo "$dc6_after-$dc6_before" | bc)
+  fi
   turbostat_runtime=$("$DIR"/turbostat --quiet --show "$pc10_para" sleep 30 2>&1)
   runtime_pkg8=$(echo "$turbostat_runtime" | sed -n '3p' |
     awk -v idx=$(get_column_index "$pc10_para" "Pkg%pc8") '{print $idx}')
@@ -976,7 +1028,15 @@ debug_no_dc9() {
   local i=""
   local turbostat_after_s2idle=""
   local duration=15
-  local dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  local dmc_dir=""
+
+  dmc_dir=$(detect_dri_path)
+  if [[ -z "$dmc_dir" ]]; then
+    log_output "\nPlease check if the Intel graphics i915 driver is not loaded \
+or the graphic controller has been disabled?"
+    return 0
+  fi
+  dmc_dir="$dmc_dir/i915_dmc_info"
 
   if [ ! -f "$dmc_dir" ]; then
     log_output "\nPlease check if the Intel graphics i915 driver is not loaded \
@@ -984,8 +1044,8 @@ or the graphic controller has been disabled?"
     return 0
   fi
 
-  dc5_before=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $(NF)}' 2>&1)
-  dc6_before=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $(NF)}' 2>&1)
+  dc5_before=$(grep -i "DC3 -> DC5" "$dmc_dir" | awk '{print $(NF)}' 2>&1)
+  dc6_before=$(grep -i "DC5 -> DC6" "$dmc_dir" | awk '{print $(NF)}' 2>&1)
   log_output "\nGFX DC5 before S2idle: $dc5_before"
   log_output "GFX DC6 before S2idle: $dc6_before"
 
@@ -1001,8 +1061,8 @@ or the graphic controller has been disabled?"
     exit 0
   fi
 
-  dc5_after=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $(NF)}' 2>&1)
-  dc6_after=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $(NF)}' 2>&1)
+  dc5_after=$(grep -i "DC3 -> DC5" "$dmc_dir" | awk '{print $(NF)}' 2>&1)
+  dc6_after=$(grep -i "DC5 -> DC6" "$dmc_dir" | awk '{print $(NF)}' 2>&1)
   log_output "\nGFX DC5 after S2idle: $dc5_after"
   log_output "GFX DC6 after S2idle: $dc6_after"
 
