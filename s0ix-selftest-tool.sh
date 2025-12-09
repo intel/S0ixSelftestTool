@@ -242,7 +242,7 @@ dmc_check() {
   local dmc_load=""
   local dmc_log=""
 
-  dmc_load=$(grep "fw loaded" /sys/kernel/debug/dri/0/i915_dmc_info | head -n 1 |
+  dmc_load=$(grep "fw loaded" /sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info | head -n 1 |
     awk '{print $3}')
   dmc_log=$(dmesg | grep -i DMC 2>&1)
 
@@ -272,7 +272,7 @@ pc10_idle_on() {
   local runtime_pkg8=""
   local runtime_pkg10=""
   local turbostat_runtime=""
-  local dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  local dmc_dir="/sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info"
   local pc10_para=$(echo "$TURBO_COLUMNS" | sed 's/,[^,]*$//')
   local dc5_before=""
   local dc5_after=""
@@ -285,7 +285,7 @@ pc10_idle_on() {
   sleep 40
   dc5_after=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $NF}' 2>&1)
   dc6_after=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $NF}' 2>&1)
-  dmc_info=$(cat /sys/kernel/debug/dri/0/i915_dmc_info)
+  dmc_info=$(cat /sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info)
   dc5_count_delta=$(echo "$dc5_after-$dc5_before" | bc)
   dc6_count_delta=$(echo "$dc6_after-$dc6_before" | bc)
   turbostat_runtime=$("$DIR"/turbostat --quiet --show "$pc10_para" sleep 30 2>&1)
@@ -494,47 +494,94 @@ pkg_output() {
     log_output "Test system does not support S0ix.y substate"
   fi
 
-  echo 0 >/sys/class/rtc/rtc0/wakealarm
-  echo +$duration >/sys/class/rtc/rtc0/wakealarm
+  local retry_count=0
+  local max_retries=1
+  local dmc_dir=""
 
-  if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
-    echo freeze 2>&1 >/sys/power/state); then
-    log_output "\nTurbostat output: \n$turbostat_after_s2idle"
-    #Let system sleep 5 seconds in case some systems cannot finish S0ix substate
-    #and pkg cstate judgement before entering next S2idle cycle.
-    sleep 5
+  if [[ -e "/sys/kernel/debug/dri/0/i915_dmc_info" ]]; then
+    dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  elif [[ -e "/sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info" ]]; then
+    dmc_dir="/sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info"
   else
-    log_output "\n\033[31mThe system failed to place S2idle entry command by turbostat, \
-    \nplease check if the suspend is failed or turbostat tool version is old \
-    \ne.g. did you make turbostat tool executable or separately run S2idle command: \
-    \nrtcwake -m freeze -s 15\033[0m\n"
-    exit 0
+    dmc_dir=$(find /sys/kernel/debug/dri -name i915_dmc_info 2>/dev/null | head -n 1)
   fi
 
-  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-  cc7=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "CPU%c7") '{print $idx}')
-  log_output "\nCPU Core C7 residency after S2idle is: $cc7"
-
-  for i in 2 3 6 8; do
-    column_idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pkg%pc$i")
-    if [ ${column_idx} -eq -1 ]; then
-      log_output "\033[31mThe system does not support the Pkg%pc$i.\033[0m"
-    else
-      pkg=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-        awk -v idx=$column_idx '{print $idx}')
-      log_output "CPU Package C-state $i residency after S2idle is: $pkg"
-      eval "pkg$i=\$pkg"
+  while [ $retry_count -le $max_retries ]; do
+    if [ $retry_count -gt 0 ]; then
+      log_output "\nRetry #$retry_count: Checking S0ix residency again..."
     fi
+
+    if [ -n "$dmc_dir" ]; then
+        dc5_before=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $(NF)}' 2>&1)
+        dc6_before=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $(NF)}' 2>&1)
+        log_output "\nGFX DC5 before S2idle: $dc5_before"
+        log_output "GFX DC6 before S2idle: $dc6_before"
+    fi
+
+    echo 0 >/sys/class/rtc/rtc0/wakealarm
+    echo +$duration >/sys/class/rtc/rtc0/wakealarm
+
+    if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
+      echo freeze 2>&1 >/sys/power/state); then
+      log_output "\nTurbostat output: \n$turbostat_after_s2idle"
+      #Let system sleep 5 seconds in case some systems cannot finish S0ix substate
+      #and pkg cstate judgement before entering next S2idle cycle.
+      sleep 5
+    else
+      log_output "\n\033[31mThe system failed to place S2idle entry command by turbostat, \
+      \nplease check if the suspend is failed or turbostat tool version is old \
+      \ne.g. did you make turbostat tool executable or separately run S2idle command: \
+      \nrtcwake -m freeze -s 15\033[0m\n"
+      exit 0
+    fi
+
+    if [ -n "$dmc_dir" ]; then
+        dc5_after=$(grep -i "DC3 -> DC5" $dmc_dir | awk '{print $(NF)}' 2>&1)
+        dc6_after=$(grep -i "DC5 -> DC6" $dmc_dir | awk '{print $(NF)}' 2>&1)
+        log_output "\nGFX DC5 after S2idle: $dc5_after"
+        log_output "GFX DC6 after S2idle: $dc6_after"
+    fi
+
+    # Dynamically find the header line number (contains "CPU%c1" or "Pkg%")
+    header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+    if [ -z "$header_line_num" ]; then
+      # Fallback if not found, though unlikely if turbostat ran
+      header_line_num=2
+    fi
+    data_line_num=$((header_line_num + 1))
+
+    TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+    cc7=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+      awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "CPU%c7") '{print $idx}')
+    log_output "\nCPU Core C7 residency after S2idle is: $cc7"
+
+    # Ignore PC2, PC6, PC8 checks as requested
+    # for i in 2 3 6 8; do
+    #   column_idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pkg%pc$i")
+    #   if [ ${column_idx} -eq -1 ]; then
+    #     log_output "\033[31mThe system does not support the Pkg%pc$i.\033[0m"
+    #   else
+    #     pkg=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+    #       awk -v idx=$column_idx '{print $idx}')
+    #     log_output "CPU Package C-state $i residency after S2idle is: $pkg"
+    #     eval "pkg$i=\$pkg"
+    #   fi
+    # done
+
+    pkg10=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+      awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
+    log_output "CPU Package C-state 10 residency after S2idle is: $pkg10"
+
+    slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+      awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
+    log_output "S0ix residency after S2idle is: $slp_s0"
+
+    if [[ "$(echo "scale=2; $slp_s0 > 0.00" | bc)" -eq 1 ]] || [[ "$(echo "scale=2; $pkg10 > 0.00" | bc)" -eq 1 ]]; then
+      break
+    fi
+
+    ((retry_count++))
   done
-
-  pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
-  log_output "CPU Package C-state 10 residency after S2idle is: $pkg10"
-
-  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
-  log_output "S0ix residency after S2idle is: $slp_s0"
 
   s0ix_substate_af="$(cat $PMC_CORE_SYSFS_PATH/substate_residencies)" 2>&1
   if [[ -z "$s0ix_substate_af" ]] &&
@@ -677,29 +724,17 @@ achieve the shallowest s0i2.0\033[0m
     #Debug scenario 4: No S0ix residency, but has PC10 residency
     DEBUG=4
 
-  elif [[ "$(echo "scale=2; $pkg8 > 0.00" | bc)" -eq 1 ]]; then
-    log_output "\nYour system achieved PC8 residency: $pkg8, \
-but no PC10 residency:$pkg10,no S0ix residency: $slp_s0"
-    #Debug scenario 3: No PC10 residency, but has PC8 residency
-    DEBUG=3
 
-  elif [[ "$(echo "scale=2; $pkg3 > 0.00" | bc)" -eq 1 ]]; then
-    log_output "\nYour system achieved PC3 residency: $pkg3, \
-but no PC8 residency during S2idle: $pkg8"
-    #Debug scenario 2: No PC8 residency, but has PC3 residency
-    DEBUG=2
 
-  elif [[ "$(echo "scale=2; $pkg2 > 0.00" | bc)" -eq 1 ]]; then
-    log_output "\nYour system achieved PC2 residency: $pkg2, \
-but no PC8 residency during S2idle: $pkg8"
-    #Debug scenario 2: No PC8 residency, but has PC2 residency
-    DEBUG=2
+
+
+
 
   else
-    #Debug scenario 0: No PC2 residency
-    log_output "\nYour system did not achieve PC2 state or PC2 residency is low: \
-    \n$pkg2"
-    DEBUG=1
+    log_output "\nYour system did not achieve PC10 residency: $pkg10, \
+no S0ix residency: $slp_s0. Proceeding to debug PC10 blockers."
+    #Debug scenario 3: No PC10 residency (skip PC8/PC2 checks)
+    DEBUG=3
   fi
 
   return 0
@@ -730,8 +765,13 @@ debug_no_pc2() {
     exit 0
   fi
 
-  cc6=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-    awk -v idx=$(get_column_index "$pc2_para" "CPU%c6") '{print $idx}')
+  header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+  if [ -z "$header_line_num" ]; then header_line_num=2; fi
+  data_line_num=$((header_line_num + 1))
+
+  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+  cc6=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "CPU%c6") '{print $idx}')
   log_output "\nCPU Core c6:$cc6"
 
   #Check whether CPU Core C6 residency is available
@@ -919,14 +959,18 @@ debug_no_pc8() {
     exit 0
   fi
 
-  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-  cc7=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+  if [ -z "$header_line_num" ]; then header_line_num=2; fi
+  data_line_num=$((header_line_num + 1))
+
+  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+  cc7=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "CPU%c7") '{print $idx}')
-  pkg8=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  pkg8=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pkg%pc8") '{print $idx}')
-  pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  pkg10=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
-  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
 
   #Check whether PC8,PC10 and S0ix is available after running powertop
@@ -976,9 +1020,19 @@ debug_no_dc9() {
   local i=""
   local turbostat_after_s2idle=""
   local duration=15
-  local dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  
+  # Try to find the correct dmc_info path
+  local dmc_dir=""
+  if [ -f "/sys/kernel/debug/dri/0/i915_dmc_info" ]; then
+    dmc_dir="/sys/kernel/debug/dri/0/i915_dmc_info"
+  elif [ -f "/sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info" ]; then
+    dmc_dir="/sys/kernel/debug/dri/0000:00:02.0/i915_dmc_info"
+  else
+    # Try to find any i915_dmc_info file
+    dmc_dir=$(find /sys/kernel/debug/dri -name i915_dmc_info 2>/dev/null | head -n 1)
+  fi
 
-  if [ ! -f "$dmc_dir" ]; then
+  if [ -z "$dmc_dir" ] || [ ! -f "$dmc_dir" ]; then
     log_output "\nPlease check if the Intel graphics i915 driver is not loaded \
 or the graphic controller has been disabled?"
     return 0
@@ -989,6 +1043,12 @@ or the graphic controller has been disabled?"
   log_output "\nGFX DC5 before S2idle: $dc5_before"
   log_output "GFX DC6 before S2idle: $dc6_before"
 
+  # Capture substate before
+  local s0ix_substate_before=""
+  if [[ -f "$PMC_CORE_SYSFS_PATH/substate_residencies" ]]; then
+      s0ix_substate_before=$(cat "$PMC_CORE_SYSFS_PATH/substate_residencies")
+  fi
+
   echo 0 >/sys/class/rtc/rtc0/wakealarm
   echo +$duration >/sys/class/rtc/rtc0/wakealarm
 
@@ -998,6 +1058,84 @@ or the graphic controller has been disabled?"
     sleep 5
   else
     log_output "\nThe system failed to place S2idle entry command, please re-try\n"
+    exit 0
+  fi
+
+  # Check if PC10/S0ix was achieved during this run
+  header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+  if [ -z "$header_line_num" ]; then header_line_num=2; fi
+  data_line_num=$((header_line_num + 1))
+
+  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+  pkg10=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
+  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+    awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
+
+  if [[ "$(echo "scale=2; $slp_s0 > 0.00" | bc)" -eq 1 ]] || [[ "$(echo "scale=2; $pkg10 > 0.00" | bc)" -eq 1 ]]; then
+    log_output "\n\033[32mSuccess! PC10 ($pkg10%) or S0ix ($slp_s0%) residency achieved during DC9 check.\033[0m"
+    log_output "The system sleep issue appears to be intermittent."
+
+    if [[ -n "$s0ix_substate_before" ]]; then
+        local s0ix_substate_after=$(cat "$PMC_CORE_SYSFS_PATH/substate_residencies")
+        log_output "\nS0ix Substate Residencies (Before -> After):"
+        log_output "Before:\n$s0ix_substate_before"
+        log_output "After:\n$s0ix_substate_after"
+
+        # Arrays to hold data
+        local -a names
+        local -a res_b
+        local -a res_a
+        local count=0
+
+        # Parse Before
+        while read -r line; do
+            if [[ "$line" =~ ^S0i ]]; then
+                names[$count]=$(echo "$line" | awk '{print $1}')
+                if [[ "$line" =~ "Enabled" ]]; then
+                    res_b[$count]=$(echo "$line" | awk '{print $3}')
+                else
+                    res_b[$count]=$(echo "$line" | awk '{print $2}')
+                fi
+                ((count++))
+            fi
+        done <<< "$s0ix_substate_before"
+
+        # Parse After (assuming same order/count)
+        local count_a=0
+        while read -r line; do
+            if [[ "$line" =~ ^S0i ]]; then
+                if [[ "$line" =~ "Enabled" ]]; then
+                    res_a[$count_a]=$(echo "$line" | awk '{print $3}')
+                else
+                    res_a[$count_a]=$(echo "$line" | awk '{print $2}')
+                fi
+                ((count_a++))
+            fi
+        done <<< "$s0ix_substate_after"
+
+        # Find deepest achieved
+        local deepest_idx=-1
+        for ((i=0; i<count; i++)); do
+            local delta=$(( res_a[i] - res_b[i] ))
+            if [[ $delta -gt 0 ]]; then
+                deepest_idx=$i
+            fi
+        done
+
+        if [[ $deepest_idx -ne -1 ]]; then
+             if [[ $deepest_idx -eq $((count - 1)) ]]; then
+                  log_output "\n\033[32mCongratulations! Your system achieved the deepest S0ix substate (${names[$deepest_idx]})!\033[0m"
+             else
+                  local achieved=${names[$deepest_idx]}
+                  local next=${names[$((deepest_idx+1))]}
+                  log_output "\n\033[31mYour system only get shallower S0ix substate residency: $achieved\033[0m"
+                  log_output "\nNeed to debug why not deeper substate: $next"
+                  substate_triage "$achieved" "$next"
+             fi
+        fi
+    fi
+
     exit 0
   fi
 
@@ -1064,10 +1202,14 @@ debug_ltr_value() {
     exit 0
   fi
 
-  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-  pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+  if [ -z "$header_line_num" ]; then header_line_num=2; fi
+  data_line_num=$((header_line_num + 1))
+
+  TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+  pkg10=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
-  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+  slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
     awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
 
   #Check whether IP LTR value ignore is helpful to the PC10 and S0ix state
@@ -1084,30 +1226,55 @@ debug_ltr_value() {
     echo 0 >/sys/class/rtc/rtc0/wakealarm
     echo +$duration >/sys/class/rtc/rtc0/wakealarm
 
-    if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
-      echo freeze 2>&1 >/sys/power/state); then
-      TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-      pkg10=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-        awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
-      slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
-        awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
-      log_output "PC10 residency is:$pc10"
-      log_output "S0ix residency is:$slp_s0"
-    else
-      log_output "The system failed to place S2idle entry command, please re-try.\n"
-      exit 0
+    # Retry logic for suspend failures
+    retry_count=0
+    max_retries=5
+    suspend_success=0
+
+    while [ $retry_count -lt $max_retries ]; do
+      if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
+        echo freeze 2>&1 >/sys/power/state); then
+        header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+        if [ -z "$header_line_num" ]; then header_line_num=2; fi
+        data_line_num=$((header_line_num + 1))
+
+        TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+        pkg10=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+          awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "Pk%pc10") '{print $idx}')
+        slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
+          awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
+        log_output "PC10 residency is:$pkg10"
+        log_output "S0ix residency is:$slp_s0"
+        suspend_success=1
+        break
+      else
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -lt $max_retries ]; then
+          log_output "Suspend failed (attempt $retry_count/$max_retries), retrying in 3 seconds..."
+          sleep 3
+        fi
+      fi
+    done
+
+    if [ $suspend_success -eq 0 ]; then
+      log_output "The system failed to suspend after $max_retries attempts for IP $counter, skipping to next IP.\n"
+      counter=$((counter + 1))
+      sleep 2
+      continue
     fi
 
     if [ "$(echo "scale=2; $slp_s0 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nS0ix residency is available after IP number $counter LTR ignore\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1
+      failed_ip_name=$(cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p")
+      log_output "Ignored IP Name: $failed_ip_name"
       exit 0
-    elif [ "$(echo "scale=2; $pc10 > 0.00" | bc)" -eq 1 ]; then
+    elif [ "$(echo "scale=2; $pkg10 > 0.00" | bc)" -eq 1 ]; then
       log_output "\nNo S0ix residency, only PC10 is available after IP number \
 $counter LTR ignore:\n"
-      let ltr_failed_ip=$l+1 &&
-        cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n ''"ltr_failed_ip"''
+      let ltr_failed_ip=$counter+1
+      failed_ip_name=$(cat "$PMC_CORE_SYSFS_PATH"/ltr_show | sed -n "${ltr_failed_ip}p")
+      log_output "Ignored IP Name: $failed_ip_name"
       return 0
       break
     else
@@ -1244,8 +1411,12 @@ debug_acpi_dsm() {
 
   if turbostat_after_s2idle=$("$DIR"/turbostat --quiet --show "$TURBO_COLUMNS" \
     echo freeze 2>&1 >/sys/power/state); then
-    TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n '2p' | sed 's/\t/,/g')
-    slp_s0=$(echo "$turbostat_after_s2idle" | sed -n '3p' |
+    header_line_num=$(echo "$turbostat_after_s2idle" | grep -n "CPU%c1\|Pkg%" | head -1 | cut -d: -f1)
+    if [ -z "$header_line_num" ]; then header_line_num=2; fi
+    data_line_num=$((header_line_num + 1))
+
+    TURBO_RESULT_COLUMNS=$(echo "$turbostat_after_s2idle" | sed -n "${header_line_num}p" | sed 's/\t/,/g')
+    slp_s0=$(echo "$turbostat_after_s2idle" | sed -n "${data_line_num}p" |
       awk -v idx=$(get_column_index "$TURBO_RESULT_COLUMNS" "SYS%LPI") '{print $idx}')
   else
     log_output "\nThe system failed to place S2idle entry command, please re-try.\n"
