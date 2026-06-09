@@ -56,12 +56,6 @@ get_column_index() {
 	echo "-1"
 }
 
-# Define script must be run as root account.
-if [[ $EUID -ne 0 ]]; then
-	log_output "\nThis script must be run as root.\n" >&2
-	exit 0
-fi
-
 usage() {
 	cat <<EOF
 Usage: ./${0##*/} [-s|h][-r on][-r off]
@@ -88,13 +82,19 @@ while getopts r:sh opt; do
 		s2idle=1
 		;;
 	h)
-		usage && exit 1
+		usage && exit 0
 		;;
 	*)
 		echo "Invalid option argument." && usage && exit 1
 		;;
 	esac
 done
+
+# Allow help/usage output without root, but enforce root for test execution.
+if [[ $EUID -ne 0 ]]; then
+	log_output "\nThis script must be run as root.\n" >&2
+	exit 0
+fi
 
 #Function to check whether slp_s0 is supported on the test platform
 slp_s0_support() {
