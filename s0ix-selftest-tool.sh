@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # SPDX-License-Identifier: GPL-2.0-only
 # This is a CPU Package C-state and S0ix failure selftest and debug script, it's
@@ -11,45 +11,52 @@
 # Author: wendy.wang@intel.com
 # Contributor: david.e.box@intel.com
 
-PATH=$PATH:$HOME
-DATE=$(date '+%Y%m%d-%H-%M')
+export PATH="${PATH}:${HOME}"
+
+DATE="$(date '+%Y%m%d-%H-%M')"
+readonly DATE
 DIR="$(pwd -P)"
-TURBO_COLUMNS="CPU%c1,CPU%c6,CPU%c7,Pkg%pc2,Pkg%pc3,Pkg%pc6,Pkg%pc8,Pk%pc10,SYS%LPI"
-DEEP="S0i2.0"
-SHALLOW="c10"
-PMC_CORE_SYSFS_PATH="/sys/kernel/debug/pmc_core"
+readonly DIR
+readonly TURBO_COLUMNS="CPU%c1,CPU%c6,CPU%c7,Pkg%pc2,Pkg%pc3,Pkg%pc6,Pkg%pc8,Pk%pc10,SYS%LPI"
+readonly DEEP="S0i2.0"
+readonly SHALLOW="c10"
+readonly PMC_CORE_SYSFS_PATH="/sys/kernel/debug/pmc_core"
+readonly LOG_FILE="${PWD}/${DATE}-s0ix-output.log"
+
 PCIEPORT_D0=""
 PCIEPORT_D3HOT=""
 PCIEPORT_L0=""
 ASPM_ENABLE=""
 KERNEL_VER="$(uname -a)"
-#Define which debug stage should go
 DEBUG=""
-touch "$PWD"/"$DATE"-s0ix-output.log
 
-#Function to archive S0ix debug output
+touch "$LOG_FILE"
+
+# Define which debug stage should go.
+
+# Archive S0ix debug output.
 log_output() {
-  echo -e "${*}" | tee -a "$PWD"/"$DATE"-s0ix-output.log
+  printf '%b\n' "$*" | tee -a "$LOG_FILE"
 }
 
-# Function to return the index of a column name in turbo columns 
-get_column_index(){
+# Return the 1-based index of a column name in a comma-separated list.
+get_column_index() {
   local columns="$1"
   local target="$2"
+
   IFS=',' read -ra column_array <<< "$columns"
 
   for i in "${!column_array[@]}"; do
     if [[ "${column_array[i]}" == "$target" ]]; then
-      echo $((i + 1))  # Return 1-based index
+      echo $((i + 1))
       return
     fi
   done
 
-  # Return -1 if the column name is not found
   echo "-1"
 }
 
-#Define script must be run as root account
+# Define script must be run as root account.
 if [[ $EUID -ne 0 ]]; then
   log_output "\nThis script must be run as root.\n" >&2
   exit 0
@@ -57,17 +64,17 @@ fi
 
 usage() {
   cat <<EOF
-  Usage: ./${0##*/} [-s|h][-r on][-r off]
-  -r: Check PC10 residency during runtime with screen on or screen off
-  -s: Check S0ix residency during S2idle
-  -h: Display help
+Usage: ./${0##*/} [-s|h][-r on][-r off]
+-r: Check PC10 residency during runtime with screen on or screen off
+-s: Check S0ix residency during S2idle
+-h: Display help
 EOF
 }
 
 runtime=0
 s2idle=0
 
-#Promote the usage info when there is no option placed
+# Show usage info when no option is provided.
 if [[ $# -lt 1 ]]; then
   usage && exit 1
 fi
