@@ -18,13 +18,19 @@ Intel client hardware; results are meaningless in a VM.
 ```bash
 ./s0ix-selftest-tool.sh -s        # Check S0ix residency during S2idle (main path)
 ./s0ix-selftest-tool.sh -r on     # Check runtime PC10 with screen on
-./s0ix-selftest-tool.sh -r off    # Check runtime PC10 with screen off (needs X/startx)
+./s0ix-selftest-tool.sh -r off    # Check runtime PC10 with screen off (X11 or GNOME/KDE Wayland)
 ./s0ix-selftest-tool.sh -h        # Help
 ```
 
 Every run appends a timestamped `YYYYMMDD-HH-MM-s0ix-output.log` in the working
 directory via the `log_output` helper (which `tee`s to that file). `-r off` turns
-the display off with `xset` and must be run from an xterminal after `startx`.
+the display off using a backend detected by `detect_display_backend`: on **X11**
+via `xset` (run it from an xterminal after `startx`); on **GNOME Wayland** by
+setting Mutter's `PowerSaveMode` D-Bus property (reliable panel power-off needs
+Mutter ≥ 46.2); on **KDE Plasma Wayland** via `kscreen-doctor --dpms off`. Because
+the script runs as root, the Wayland paths reach the logged-in user's session bus
+(found via `loginctl`, `/run/user/<uid>/bus`) through `run_as_session_user`. Other
+Wayland compositors are detected but only get manual-instruction output.
 
 External tool dependencies: `turbostat` (bundled binary in repo root, invoked as
 `"$DIR"/turbostat`), `powertop`, `acpidump`/`iasl` (acpica-tools), `xxd`

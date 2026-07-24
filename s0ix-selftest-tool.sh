@@ -351,19 +351,193 @@ during screen ON\033[0m\n"
   return 1
 }
 
+#Function to detect the graphical session backend used for turning the display
+#off. X11 keeps the legacy xset path; Wayland is handled per-compositor (GNOME
+#and KDE) since there is no universal Wayland DPMS command.
+#Sets globals:
+#  DISPLAY_BACKEND  one of: x11, wayland-gnome, wayland-kde, wayland-unknown, unknown
+#  WL_USER/WL_UID/WL_RUNTIME_DIR/WL_DBUS/WL_DISPLAY  the logged-in user's session
+#  bus coordinates, so this root process can reach the per-user compositor.
+detect_display_backend() {
+  DISPLAY_BACKEND="unknown"
+  WL_USER=""
+  WL_UID=""
+  WL_RUNTIME_DIR=""
+  WL_DBUS=""
+  WL_DISPLAY=""
+
+  local session_type=""
+  local desktop=""
+  local uid=""
+  local user=""
+
+  #Root has no graphical session env of its own; query the active seat instead.
+  if command -v loginctl >/dev/null 2>&1; then
+    local sid=""
+    for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+      [[ "$(loginctl show-session "$sid" -p Active --value 2>/dev/null)" == "yes" ]] ||
+        continue
+      local t
+      t=$(loginctl show-session "$sid" -p Type --value 2>/dev/null)
+      [[ "$t" == "wayland" || "$t" == "x11" ]] || continue
+      session_type="$t"
+      desktop=$(loginctl show-session "$sid" -p Desktop --value 2>/dev/null)
+      uid=$(loginctl show-session "$sid" -p User --value 2>/dev/null)
+      user=$(loginctl show-session "$sid" -p Name --value 2>/dev/null)
+      break
+    done
+  fi
+
+  #Fall back to this process's environment when loginctl gives nothing.
+  [[ -z "$session_type" ]] && session_type="$XDG_SESSION_TYPE"
+  [[ -z "$desktop" ]] && desktop="$XDG_CURRENT_DESKTOP"
+  desktop="${desktop,,}"
+
+  #X11: xset drives the running server (DISPLAY inherited from the xterminal).
+  if [[ "$session_type" == "x11" ]] ||
+    [[ "$session_type" != "wayland" && -z "$WAYLAND_DISPLAY" && -n "$DISPLAY" ]]; then
+    DISPLAY_BACKEND="x11"
+    return 0
+  fi
+
+  if [[ "$session_type" == "wayland" || -n "$WAYLAND_DISPLAY" ]]; then
+    WL_USER="$user"
+    WL_UID="$uid"
+    if [[ -n "$WL_UID" ]]; then
+      WL_RUNTIME_DIR="/run/user/$WL_UID"
+      WL_DBUS="unix:path=$WL_RUNTIME_DIR/bus"
+      #The wayland socket is usually wayland-0 but discover it to be safe.
+      local sock
+      for sock in "$WL_RUNTIME_DIR"/wayland-[0-9]*; do
+        [[ -S "$sock" ]] && WL_DISPLAY="${sock##*/}" && break
+      done
+    fi
+    case "$desktop" in
+    *gnome*) DISPLAY_BACKEND="wayland-gnome" ;;
+    *kde* | *plasma*) DISPLAY_BACKEND="wayland-kde" ;;
+    *) DISPLAY_BACKEND="wayland-unknown" ;;
+    esac
+    return 0
+  fi
+
+  DISPLAY_BACKEND="unknown"
+  return 0
+}
+
+#Run "$@" as the graphical session user with their session-bus environment, so a
+#root-invoked script can reach the per-user compositor D-Bus interfaces.
+run_as_session_user() {
+  [[ -n "$WL_USER" && -n "$WL_RUNTIME_DIR" ]] || return 1
+  local runner=()
+  if command -v runuser >/dev/null 2>&1; then
+    runner=(runuser -u "$WL_USER" --)
+  elif command -v sudo >/dev/null 2>&1; then
+    runner=(sudo -u "$WL_USER")
+  else
+    return 1
+  fi
+  "${runner[@]}" env \
+    XDG_RUNTIME_DIR="$WL_RUNTIME_DIR" \
+    DBUS_SESSION_BUS_ADDRESS="$WL_DBUS" \
+    ${WL_DISPLAY:+WAYLAND_DISPLAY="$WL_DISPLAY"} \
+    "$@"
+}
+
+#Turn the display off for the detected Wayland compositor.
+display_off() {
+  case "$DISPLAY_BACKEND" in
+  wayland-gnome)
+    #Mutter DisplayConfig PowerSaveMode: 0=on, 3=off. Reliable panel power-off
+    #needs Mutter >= 46.2; older versions only blank and re-enable after ~13s.
+    run_as_session_user busctl --user set-property \
+      org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig \
+      org.gnome.Mutter.DisplayConfig PowerSaveMode i 3
+    ;;
+  wayland-kde)
+    run_as_session_user kscreen-doctor --dpms off
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+#Turn the display back on for the detected backend.
+display_on() {
+  case "$DISPLAY_BACKEND" in
+  x11)
+    display_on
+    ;;
+  wayland-gnome)
+    run_as_session_user busctl --user set-property \
+      org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig \
+      org.gnome.Mutter.DisplayConfig PowerSaveMode i 0
+    ;;
+  wayland-kde)
+    run_as_session_user kscreen-doctor --dpms on
+    ;;
+  esac
+}
+
 #Function to check runtime PC10 residency when screen OFF
 pc10_idle_off() {
   local pc10_para=$(echo "$TURBO_COLUMNS" | sed 's/,[^,]*$//')
-  log_output "\nThis script will turn off display using xset command, \
-  \nplease startx first, then run this script in xterminal.\n"
-  #Turn off display using xset command in GUI
-  xset +dpms 2>&1 || {
-    log_output "\033[31mPlease run this runtime PC10 check after startx\033[0m\n"
+
+  detect_display_backend
+  case "$DISPLAY_BACKEND" in
+  x11)
+    log_output "\nDetected an X11 session. This script will turn off the display \
+    \nusing the xset command; please startx first, then run this script in an \
+    \nxterminal.\n"
+    #Turn off display using xset command in GUI
+    xset +dpms 2>&1 || {
+      log_output "\033[31mPlease run this runtime PC10 check after startx\033[0m\n"
+      exit 0
+    }
+    log_output "\nWill turn off the display in 30 seconds timeout, then the \
+    \nturbostat tool will read the PC10 counter after 40 seconds idle...\n"
+    xset dpms 30
+    ;;
+  wayland-gnome)
+    log_output "\nDetected a GNOME Wayland session (user: $WL_USER). Turning the \
+    \ndisplay off via the Mutter DisplayConfig PowerSaveMode D-Bus property...\n"
+    display_off || {
+      log_output "\033[31mFailed to turn off the display on GNOME Wayland. \
+      \nNote: reliable panel power-off requires Mutter >= 46.2; earlier versions \
+      \nonly blank the screen and re-enable it after ~13 seconds.\033[0m\n"
+      exit 0
+    }
+    log_output "\nThe turbostat tool will read the PC10 counter after 40 seconds \
+    \nidle...\n"
+    ;;
+  wayland-kde)
+    log_output "\nDetected a KDE Plasma Wayland session (user: $WL_USER). Turning \
+    \nthe display off via kscreen-doctor --dpms off...\n"
+    display_off || {
+      log_output "\033[31mFailed to turn off the display on KDE Wayland. Please \
+      \nensure kscreen-doctor (libkscreen) is installed.\033[0m\n"
+      exit 0
+    }
+    log_output "\nThe turbostat tool will read the PC10 counter after 40 seconds \
+    \nidle...\n"
+    ;;
+  wayland-unknown)
+    log_output "\033[31mDetected a Wayland session on an unsupported compositor \
+    \n(${XDG_CURRENT_DESKTOP:-unknown}). This tool can automatically turn the \
+    \ndisplay off only on GNOME and KDE Plasma Wayland. Please turn your display \
+    \noff manually using your compositor's method, for example: \
+    \n  - wlroots/sway: swaymsg 'output * power off'  or  wlopm --off '*' \
+    \n  - wlr-randr:    wlr-randr --output <name> --off \
+    \nthen re-run this check, or use an X11 session so xset can be used.\033[0m\n"
     exit 0
-  }
-  log_output "\nWill turn off the display in 30 seconds timeout, then the \
-  \nturbostat tool will read the PC10 counter after 40 seconds idle...\n"
-  xset dpms 30
+    ;;
+  *)
+    log_output "\033[31mCould not detect an active X11 or Wayland graphical \
+    \nsession. Please run this runtime PC10 (screen off) check from within a \
+    \ngraphical session: startx for X11, or log into GNOME/KDE for Wayland.\033[0m\n"
+    exit 0
+    ;;
+  esac
 
   local runtime_pkg8=""
   local runtime_pkg10=""
@@ -390,7 +564,7 @@ test platform. \
     [[ "$(echo "scale=2; $runtime_pkg10 > 90.00" | bc)" -eq 1 ]]; then
     log_output "\n\033[32mYour system achieved the high runtime PC10 residency during \
 screen OFF: $runtime_pkg10%\033[0m\n"
-    xset dpms force on && xset -dpms
+    display_on
     return 0
 
   elif
@@ -400,7 +574,7 @@ screen OFF: $runtime_pkg10%\033[0m\n"
   then
     log_output "\nYour system achieved the runtime PC10 during screen OFF, \
     \nbut the residency is not high enough: $runtime_pkg10%\n"
-    xset dpms force on && xset -dpms
+    display_on
     return 0
 
   elif
@@ -411,7 +585,7 @@ screen OFF: $runtime_pkg10%\033[0m\n"
     log_output "\n\033[31mYour system achieved the runtime PC10 state during Screen OFF, \
     \nbut the residency is too low and need to do the further debugging: \
   $runtime_pkg10%\033[0m\n"
-    xset dpms force on && xset -dpms
+    display_on
     return 0
 
   elif
@@ -420,13 +594,13 @@ screen OFF: $runtime_pkg10%\033[0m\n"
   then
     log_output "\n\033[32mYour system did not achieve the runtime PC10 during screen OFF, \
 \nbut the runtime PC8 residency is available:$runtime_pkg8%\033[0m\n"
-    xset dpms force on && xset -dpms
+    display_on
     return 0
   fi
 
   log_output "\n\033[31mYour system did not achieve the runtime PC10 state \
 with screen OFF\033[0m\n"
-  xset dpms force on && xset -dpms
+  display_on
   return 1
 }
 
